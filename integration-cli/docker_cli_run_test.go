@@ -768,3 +768,30 @@ func TestProcWritableInPrivilegedContainers(t *testing.T) {
 
 	logDone("run - proc writable in privileged container")
 }
+
+// #5591 ensure --expose works when the protocol is specified
+func TestExposePortWithSpecificProtocol(t *testing.T) {
+	cmd := exec.Command(dockerBinary, "run", "--expose", "5500/tcp", "--rm", "busybox", "true")
+	if code, err := runCommand(cmd); err != nil || code != 0 {
+		t.Fatalf("exposing port 5500 tcp should've worked")
+	}
+
+	cmd = exec.Command(dockerBinary, "run", "--expose", "5500/udp", "--rm", "busybox", "true")
+	if code, err := runCommand(cmd); err != nil || code != 0 {
+		t.Fatalf("exposing port 5500 udp should've worked")
+	}
+
+	cmd = exec.Command(dockerBinary, "run", "--expose", "5500/tcp", "-P", "--rm", "busybox", "true")
+	if code, err := runCommand(cmd); err != nil || code != 0 {
+		t.Fatalf("exposing port 5500 tcp should've worked")
+	}
+
+	cmd = exec.Command(dockerBinary, "run", "--expose", "5500/udp", "-P", "--rm", "busybox", "true")
+	if code, err := runCommand(cmd); err != nil || code != 0 {
+		t.Fatalf("exposing port 5500 udp should've worked")
+	}
+
+	deleteAllContainers()
+
+	logDone("run - expose port with specific protocol")
+}
