@@ -54,7 +54,7 @@ type bufReader struct {
 func NewBufReader(r io.Reader) *bufReader {
 	reader := &bufReader{
 		buf:      &bytes.Buffer{},
-		drainBuf: make([]byte, 1024),
+		drainBuf: make([]byte, 128),
 		reader:   r,
 	}
 	reader.wait.L = &reader.Mutex
