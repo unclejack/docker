@@ -52,8 +52,10 @@ type bufReader struct {
 }
 
 func NewBufReader(r io.Reader) *bufReader {
+	var bufData [32768]byte
+	buffer := bytes.NewBuffer(bufData[:0])
 	reader := &bufReader{
-		buf:      &bytes.Buffer{},
+		buf:      buffer,
 		drainBuf: make([]byte, 1024),
 		reader:   r,
 	}
