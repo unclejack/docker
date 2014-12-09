@@ -1,9 +1,7 @@
 package ioutils
 
 import (
-	"bytes"
 	"io"
-	"sync"
 )
 
 type readCloserWrapper struct {
@@ -42,72 +40,78 @@ func NewReaderErrWrapper(r io.Reader, closer func()) io.Reader {
 	}
 }
 
+type buffer struct {
+	data []byte
+	size int
+	err  error
+}
+
 type bufReader struct {
-	sync.Mutex
-	buf      *bytes.Buffer
-	reader   io.Reader
-	err      error
-	wait     sync.Cond
-	drainBuf []byte
+	returning chan *buffer
+	outgoing  chan *buffer
+	reader    io.Reader
+	err       error
 }
 
 func NewBufReader(r io.Reader) *bufReader {
-	var bufData [32768]byte
-	buffer := bytes.NewBuffer(bufData[:0])
 	reader := &bufReader{
-		buf:      buffer,
-		drainBuf: make([]byte, 1024),
-		reader:   r,
+		returning: make(chan *buffer, 32),
+		outgoing:  make(chan *buffer, 32),
+		reader:    r,
 	}
-	reader.wait.L = &reader.Mutex
+	reader.seed(32)
 	go reader.drain()
 	return reader
 }
 
-func NewBufReaderWithDrainbufAndBuffer(r io.Reader, drainBuffer []byte, buffer *bytes.Buffer) *bufReader {
-	reader := &bufReader{
-		buf:      buffer,
-		drainBuf: drainBuffer,
-		reader:   r,
+func (r *bufReader) seed(n int) {
+	var data []byte
+	var buf *buffer
+	for i := 0; i < n; i++ {
+		data = make([]byte, 1024)
+		buf = &buffer{
+			data,
+			0,
+			nil,
+		}
+		r.returning <- buf
 	}
-	reader.wait.L = &reader.Mutex
-	go reader.drain()
-	return reader
 }
 
 func (r *bufReader) drain() {
+	var buf *buffer
 	for {
-		n, err := r.reader.Read(r.drainBuf)
-		r.Lock()
-		if err != nil {
-			r.err = err
-		} else {
-			r.buf.Write(r.drainBuf[0:n])
-		}
-		r.wait.Signal()
-		r.Unlock()
+		buf = <-r.returning
+		n, err := r.reader.Read(buf.data)
+		buf.size = n
+		buf.err = err
+		r.outgoing <- buf
 		if err != nil {
 			break
 		}
 	}
 }
 
+func (r *bufReader) returnBuffer(buf *buffer) {
+	r.returning <- buf
+}
+
 func (r *bufReader) Read(p []byte) (n int, err error) {
-	r.Lock()
-	defer r.Unlock()
-	for {
-		n, err = r.buf.Read(p)
-		if n > 0 {
-			return n, err
-		}
-		if r.err != nil {
-			return 0, r.err
-		}
-		r.wait.Wait()
+	var buf *buffer
+	buf = <-r.outgoing
+	n = buf.size
+	err = buf.err
+	if buf.size == 0 && buf.err != nil {
+		return 0, buf.err
 	}
+	copy(p, buf.data[0:buf.size])
+	r.returning <- buf
+	return
 }
 
 func (r *bufReader) Close() error {
+	close(r.outgoing)
+	close(r.returning)
 	closer, ok := r.reader.(io.ReadCloser)
 	if !ok {
 		return nil
