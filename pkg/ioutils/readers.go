@@ -49,6 +49,7 @@ type buffer struct {
 type bufReader struct {
 	returning chan *buffer
 	outgoing  chan *buffer
+	terminate chan int
 	reader    io.Reader
 	err       error
 }
@@ -57,6 +58,7 @@ func NewBufReader(r io.Reader) *bufReader {
 	reader := &bufReader{
 		returning: make(chan *buffer, 32),
 		outgoing:  make(chan *buffer, 32),
+		terminate: make(chan int),
 		reader:    r,
 	}
 	reader.seed(32)
@@ -81,13 +83,17 @@ func (r *bufReader) seed(n int) {
 func (r *bufReader) drain() {
 	var buf *buffer
 	for {
-		buf = <-r.returning
-		n, err := r.reader.Read(buf.data)
-		buf.size = n
-		buf.err = err
-		r.outgoing <- buf
-		if err != nil {
-			break
+		select {
+		case <-r.terminate:
+			return
+		case buf = <-r.returning:
+			n, err := r.reader.Read(buf.data)
+			buf.size = n
+			buf.err = err
+			r.outgoing <- buf
+			if err != nil {
+				break
+			}
 		}
 	}
 }
@@ -99,17 +105,19 @@ func (r *bufReader) returnBuffer(buf *buffer) {
 func (r *bufReader) Read(p []byte) (n int, err error) {
 	var buf *buffer
 	buf = <-r.outgoing
-	n = buf.size
-	err = buf.err
-	if buf.size == 0 && buf.err != nil {
-		return 0, buf.err
+	if buf != nil {
+		n = buf.size
+		err = buf.err
+		if buf.size > 0 {
+			copy(p, buf.data[0:buf.size])
+		}
+		r.returning <- buf
 	}
-	copy(p, buf.data[0:buf.size])
-	r.returning <- buf
 	return
 }
 
 func (r *bufReader) Close() error {
+	r.terminate <- 1
 	close(r.outgoing)
 	close(r.returning)
 	closer, ok := r.reader.(io.ReadCloser)
