@@ -1,7 +1,7 @@
 package ioutils
 
 import (
-	"bytes"
+	"bufio"
 	"io"
 	"sync"
 )
@@ -44,8 +44,8 @@ func NewReaderErrWrapper(r io.Reader, closer func()) io.Reader {
 
 type bufReader struct {
 	sync.Mutex
-	buf      *bytes.Buffer
 	reader   io.Reader
+	buf      *bufio.Reader
 	err      error
 	wait     sync.Cond
 	drainBuf []byte
@@ -53,20 +53,8 @@ type bufReader struct {
 
 func NewBufReader(r io.Reader) *bufReader {
 	reader := &bufReader{
-		buf:      &bytes.Buffer{},
-		drainBuf: make([]byte, 1024),
-		reader:   r,
-	}
-	reader.wait.L = &reader.Mutex
-	go reader.drain()
-	return reader
-}
-
-func NewBufReaderWithDrainbufAndBuffer(r io.Reader, drainBuffer []byte, buffer *bytes.Buffer) *bufReader {
-	reader := &bufReader{
-		buf:      buffer,
-		drainBuf: drainBuffer,
-		reader:   r,
+		buf:    bufio.NewReaderSize(r, 32*1024),
+		reader: r,
 	}
 	reader.wait.L = &reader.Mutex
 	go reader.drain()
@@ -75,12 +63,10 @@ func NewBufReaderWithDrainbufAndBuffer(r io.Reader, drainBuffer []byte, buffer *
 
 func (r *bufReader) drain() {
 	for {
-		n, err := r.reader.Read(r.drainBuf)
 		r.Lock()
+		_, err := r.buf.Peek(5)
 		if err != nil {
 			r.err = err
-		} else {
-			r.buf.Write(r.drainBuf[0:n])
 		}
 		r.wait.Signal()
 		r.Unlock()
